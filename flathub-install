@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# description: flathub live search with fzf (nome + application alinhados dinamicamente + fallback)
+# dependencies: flatpak, fzf, awk, tput
+
+# calc terminal width and adjust space for names
+TERM_WIDTH=$(tput cols)
+NAME_WIDTH=$((TERM_WIDTH - 45))
+if (( NAME_WIDTH < 20 )); then
+    NAME_WIDTH=20  # min width
+fi
+
+# dinamic fzf
+fzf_command='bash -c "
+query={q};
+if [ -z \"\$query\" ]; then
+    echo \"\";  # nothing when nothing
+else
+    flatpak search --columns=name,application \"\$query\" \
+        | head -n 30 \
+        | awk '\''{ app=\$NF; name=substr(\$0,1,length(\$0)-length(app)-1); printf \"%-'"$NAME_WIDTH"'s %s\n\", name, app }'\'' ;
+fi
+"'
+
+# interactive fzf
+selected_app=$(echo "" | fzf --ansi --phony \
+    --bind "change:reload($fzf_command)" \
+    --header="Type to search Flathub (Enter to install, ESC to leave)" \
+    --prompt="Search ~> " \
+    --no-hscroll \
+    --preview 'app_id=$(echo {} | awk "{print \$NF}"); \
+        flatpak remote-info flathub "$app_id" 2>/dev/null \
+        || echo "No info"' \
+    --preview-window=up:wrap:70% \
+    --height=90% \
+    --min-height=20 \
+    --reverse)
+
+# if cancel
+if [ -z "$selected_app" ]; then
+    echo "No app selected."
+    exit 0
+fi
+
+# extract app id (last column)
+app_id=$(echo "$selected_app" | awk '{print $NF}')
+
+echo
+read -rp "Install '$app_id'? (Y/n) " confirm
+if [[ "$confirm" =~ ^[yY]$ ]]; then
+    flatpak install flathub "$app_id"
+else
+    echo "Canceled."
+fi
+
